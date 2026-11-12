@@ -4,8 +4,14 @@ npm-debug.log*
 
 # Environment / secrets
 .env
+.env.local
+
+# Vercel
+.vercel/
 
 # OS & editor
 .DS_Store
 Thumbs.db
 .idea/
+# Template Vercel yang tidak dipakai
+my-mongodb-app/

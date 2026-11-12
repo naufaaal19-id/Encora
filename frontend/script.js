@@ -1,6 +1,7 @@
 'use strict';
 // Encora - frontend (HTML + CSS + JavaScript vanilla + Socket.IO client)
-const socket = io();
+// Kosongkan ENCORA_BACKEND_URL (frontend/config.js) kalau frontend & backend satu server.
+const socket = window.ENCORA_BACKEND_URL ? io(window.ENCORA_BACKEND_URL) : io();
 
 // ==========================================
 // KONSTANTA & STATE

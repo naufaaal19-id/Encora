@@ -1,14 +1,15 @@
-// Encora - Backend (Node.js + Express + Socket.IO + MySQL)
-// Event Socket.IO sama persis dengan versi Python sebelumnya,
-// jadi frontend tidak perlu diubah.
-
-require('dotenv').config();
+// Encora - Backend (Node.js + Express + Socket.IO + MongoDB Atlas)
+// Event Socket.IO sama persis dengan versi MySQL/PostgreSQL, jadi frontend tidak perlu diubah.
 
 const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
+require('dotenv').config({ path: path.join(__dirname, '.env.local') });      // hasil "vercel env pull"
+require('dotenv').config({ path: path.join(__dirname, '..', '.env.local') });
+
 const http = require('http');
 const express = require('express');
 const { Server } = require('socket.io');
-const mysql = require('mysql2/promise');
+const { MongoClient, ObjectId } = require('mongodb');
 
 // ==========================================
 // KONFIGURASI
@@ -16,20 +17,23 @@ const mysql = require('mysql2/promise');
 const PORT = Number(process.env.PORT) || 5000;
 const frontendDir = path.join(__dirname, '..', 'frontend');
 
-const pool = mysql.createPool({
-    host: process.env.DB_HOST || 'localhost',
-    port: Number(process.env.DB_PORT) || 3306,
-    user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASSWORD || '',
-    database: process.env.DB_NAME || 'Encora_db',
-    charset: 'utf8mb4',
-    waitForConnections: true,
-    connectionLimit: 10
-});
+const MONGODB_URI = process.env.MONGODB_URI;
+const DB_NAME = process.env.DB_NAME || 'encora';
+if (!MONGODB_URI) {
+    console.error('-> [CONFIG] MONGODB_URI belum diisi di backend/.env');
+    process.exit(1);
+}
+
+const client = new MongoClient(MONGODB_URI, { serverSelectionTimeoutMS: 8000 });
+const db = client.db(DB_NAME);
+const users = db.collection('users');
+const messages = db.collection('messages');
+const hidden = db.collection('message_hidden');   // pesan yang dihapus pengguna (hapus untuk saya)
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
+// FRONTEND_ORIGIN (opsional): domain frontend, mis. https://encora.vercel.app. Kosong = semua boleh.
+const io = new Server(server, { cors: { origin: process.env.FRONTEND_ORIGIN || '*' } });
 
 // { socket.id: { user_id, user_name } }
 const onlineUsers = new Map();
@@ -38,13 +42,13 @@ const ID_PATTERN = /^[A-Za-z0-9_]{3,30}$/;
 // 1 frame = start 0 + 7 bit data + 1 bit parity + end 1 (kelipatan 10 bit)
 const FRAME_PATTERN = /^(?:0[01]{8}1)+$/;
 
-const DB_DOWN_CODES = new Set([
-    'ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT', 'PROTOCOL_CONNECTION_LOST',
-    'ER_ACCESS_DENIED_ERROR', 'ER_BAD_DB_ERROR'
+const DB_DOWN_NAMES = new Set([
+    'MongoServerSelectionError', 'MongoNetworkError', 'MongoNetworkTimeoutError', 'MongoParseError'
 ]);
 
 function dbErrorMessage(err, fallback) {
-    return DB_DOWN_CODES.has(err && err.code)
+    const authFailed = err && (err.codeName === 'AuthenticationFailed' || err.code === 18);
+    return (err && DB_DOWN_NAMES.has(err.name)) || authFailed
         ? 'Server tidak terhubung ke database!'
         : fallback;
 }
@@ -61,6 +65,7 @@ function getActiveOnlineUserIds() {
 // FILE STATIC FRONTEND
 // ==========================================
 app.use(express.static(frontendDir));
+app.get('/healthz', (req, res) => res.json({ ok: true }));
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 
 // ==========================================
@@ -88,19 +93,21 @@ io.on('connection', (socket) => {
         }
 
         try {
-            const [exists] = await pool.query(
-                'SELECT 1 FROM users WHERE user_id = ? OR email = ? LIMIT 1',
-                [userId, email]
-            );
-            if (exists.length > 0) {
+            const exists = await users.findOne({ $or: [{ user_id: userId }, { email }] }, { projection: { _id: 1 } });
+            if (exists) {
                 return socket.emit('auth_response', { status: 'error', message: 'ID atau Email sudah digunakan!' });
             }
 
-            await pool.query(
-                `INSERT INTO users (user_id, username, email, password, access_key, created_at)
-                 VALUES (?, ?, ?, ?, ?, NOW())`,
-                [userId, userName, email, password, accessKey]
-            );
+            await users.insertOne({
+                user_id: userId,
+                username: userName,
+                email,
+                password,
+                access_key: accessKey,
+                ip_address: null,
+                created_at: new Date(),
+                last_login: null
+            });
 
             console.log(`-> [REGISTER SUCCESS] ${userName} (${userId})`);
             socket.emit('auth_response', {
@@ -110,7 +117,7 @@ io.on('connection', (socket) => {
             });
         } catch (err) {
             console.error('-> [ERROR REGISTER]:', err.message);
-            const msg = err.code === 'ER_DUP_ENTRY'
+            const msg = err.code === 11000
                 ? 'ID atau Email sudah digunakan!'
                 : dbErrorMessage(err, 'Terjadi kesalahan sistem saat registrasi.');
             socket.emit('auth_response', { status: 'error', message: msg });
@@ -124,11 +131,7 @@ io.on('connection', (socket) => {
         const password = String(data.password || '');
 
         try {
-            const [users] = await pool.query(
-                'SELECT user_id, username, password FROM users WHERE email = ? LIMIT 1',
-                [email]
-            );
-            const user = users[0];
+            const user = email ? await users.findOne({ email }) : null;
 
             if (!email || !password || !user || user.password !== password) {
                 return socket.emit('auth_response', { status: 'error', message: 'Email atau Password salah!' });
@@ -137,27 +140,32 @@ io.on('connection', (socket) => {
             const userId = user.user_id;
             const userName = user.username;
 
-            await pool.query('UPDATE users SET last_login = NOW() WHERE user_id = ?', [userId]);
+            await users.updateOne({ user_id: userId }, { $set: { last_login: new Date() } });
 
-            // Riwayat chat (kolom message bertipe LONGBLOB -> Buffer)
-            const [rows] = await pool.query(
-                `SELECT m.id, m.sender_id, m.sender_name, m.receiver_id,
-                        u.username AS receiver_name, m.message, m.created_at
-                 FROM messages m
-                 LEFT JOIN users u ON u.user_id = m.receiver_id
-                 WHERE (m.sender_id = ? OR m.receiver_id = ?)
-                   AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
-                 ORDER BY m.created_at ASC, m.id ASC`,
-                [userId, userId, userId]
+            // Riwayat chat, tanpa pesan yang sudah dihapus pengguna ini
+            const hiddenIds = new Set(
+                (await hidden.find({ user_id: userId }).project({ message_id: 1 }).toArray()).map((h) => h.message_id)
             );
+            const rows = (await messages
+                .find({ $or: [{ sender_id: userId }, { receiver_id: userId }] })
+                .sort({ created_at: 1, _id: 1 })
+                .toArray()
+            ).filter((row) => !hiddenIds.has(String(row._id)));
+
+            // Nama penerima (pengganti LEFT JOIN)
+            const receiverIds = [...new Set(rows.map((r) => r.receiver_id))];
+            const nameRows = receiverIds.length
+                ? await users.find({ user_id: { $in: receiverIds } }).project({ user_id: 1, username: 1 }).toArray()
+                : [];
+            const nameOf = new Map(nameRows.map((u) => [u.user_id, u.username]));
 
             const history = rows.map((row) => ({
-                id: row.id,
+                id: String(row._id),
                 sender_id: row.sender_id,
                 sender_name: row.sender_name,
                 receiver_id: row.receiver_id,
-                receiver_name: row.receiver_name,
-                message: Buffer.isBuffer(row.message) ? row.message.toString('utf8') : String(row.message || ''),
+                receiver_name: nameOf.get(row.receiver_id) || null,
+                message: String(row.message || ''),
                 created_at: row.created_at ? new Date(row.created_at).toISOString() : null
             }));
 
@@ -209,13 +217,8 @@ io.on('connection', (socket) => {
 
         try {
             // Kunci yang dicek = kunci user yang login (dari sesi server)
-            const [rows] = await pool.query(
-                'SELECT access_key FROM users WHERE user_id = ? LIMIT 1',
-                [me.user_id]
-            );
-            const row = rows[0];
-            let dbKey = row ? row.access_key : null;
-            if (Buffer.isBuffer(dbKey)) dbKey = dbKey.toString('utf8');
+            const row = await users.findOne({ user_id: me.user_id }, { projection: { access_key: 1 } });
+            const dbKey = row ? row.access_key : null;
 
             if (!row || !dbKey) {
                 socket.emit('key_response', { ok: false, message: 'Akun belum punya kunci.' });
@@ -248,14 +251,11 @@ io.on('connection', (socket) => {
             return socket.emit('key_changed', { ok: false, message: 'Kunci baru minimal 4 karakter.' });
         }
         try {
-            const [rows] = await pool.query('SELECT access_key FROM users WHERE user_id = ? LIMIT 1', [me.user_id]);
-            let dbKey = rows[0] ? rows[0].access_key : null;
-            if (Buffer.isBuffer(dbKey)) dbKey = dbKey.toString('utf8');
-
-            if (!dbKey || dbKey !== oldKey) {
+            const row = await users.findOne({ user_id: me.user_id }, { projection: { access_key: 1 } });
+            if (!row || !row.access_key || row.access_key !== oldKey) {
                 return socket.emit('key_changed', { ok: false, message: 'Kunci lama belum benar.' });
             }
-            await pool.query('UPDATE users SET access_key = ? WHERE user_id = ?', [newKey, me.user_id]);
+            await users.updateOne({ user_id: me.user_id }, { $set: { access_key: newKey } });
             socket.emit('key_changed', { ok: true });
         } catch (err) {
             console.error('-> [ERROR CHANGE KEY]:', err.message);
@@ -268,19 +268,22 @@ io.on('connection', (socket) => {
         const me = onlineUsers.get(socket.id);
         if (!me) return;
         const ids = (Array.isArray(data && data.ids) ? data.ids : [])
-            .map(Number).filter(Number.isInteger).slice(0, 500);
+            .map(String).filter((s) => ObjectId.isValid(s) && s.length === 24).slice(0, 500);
         if (ids.length === 0) return;
         try {
             // Hanya pesan yang melibatkan pengguna ini yang boleh disembunyikan
-            const [rows] = await pool.query(
-                'SELECT id FROM messages WHERE id IN (?) AND (sender_id = ? OR receiver_id = ?)',
-                [ids, me.user_id, me.user_id]
-            );
+            const rows = await messages
+                .find({ _id: { $in: ids.map((s) => new ObjectId(s)) }, $or: [{ sender_id: me.user_id }, { receiver_id: me.user_id }] })
+                .project({ _id: 1 })
+                .toArray();
             if (rows.length === 0) return;
-            await pool.query(
-                'INSERT IGNORE INTO message_hidden (user_id, message_id) VALUES ?',
-                [rows.map((r) => [me.user_id, r.id])]
-            );
+            await hidden.bulkWrite(rows.map((r) => ({
+                updateOne: {
+                    filter: { user_id: me.user_id, message_id: String(r._id) },
+                    update: { $setOnInsert: { created_at: new Date() } },
+                    upsert: true
+                }
+            })));
         } catch (err) {
             console.error('-> [ERROR DELETE MESSAGES]:', err.message);
         }
@@ -310,22 +313,21 @@ io.on('connection', (socket) => {
 
         let msgId = null;
         try {
-            const [found] = await pool.query(
-                'SELECT user_id FROM users WHERE user_id = ? LIMIT 1',
-                [receiverId]
-            );
-            if (found.length === 0) {
+            const found = await users.findOne({ user_id: receiverId }, { projection: { user_id: 1 } });
+            if (!found) {
                 return socket.emit('message_error', { message: `ID "${receiverId}" tidak ditemukan!` });
             }
-            receiverId = found[0].user_id;
+            receiverId = found.user_id;
 
-            const [ins] = await pool.query(
-                `INSERT INTO messages (sender_id, sender_name, receiver_id, message, created_at)
-                 VALUES (?, ?, ?, ?, NOW())`,
-                [sender.user_id, sender.user_name, receiverId, Buffer.from(binaryMessage, 'utf8')]
-            );
-            msgId = ins.insertId;
-            console.log(`-> [SUCCESS] Pesan LONGBLOB (${binaryMessage.length} bit) ${sender.user_id} -> ${receiverId} tersimpan di MySQL`);
+            const ins = await messages.insertOne({
+                sender_id: sender.user_id,
+                sender_name: sender.user_name,
+                receiver_id: receiverId,
+                message: binaryMessage,
+                created_at: new Date()
+            });
+            msgId = String(ins.insertedId);
+            console.log(`-> [SUCCESS] Pesan (${binaryMessage.length} bit) ${sender.user_id} -> ${receiverId} tersimpan di MongoDB`);
         } catch (err) {
             console.error('-> [ERROR DATABASE MESSAGES]:', err.message);
             return socket.emit('message_error', {
@@ -361,20 +363,20 @@ io.on('connection', (socket) => {
 // ==========================================
 // START SERVER
 // ==========================================
-server.listen(PORT, '0.0.0.0', () => {
+server.listen(PORT, '0.0.0.0', async () => {
     console.log(`Encora berjalan di http://localhost:${PORT}`);
-    pool.query('SELECT 1')
-        .then(() => {
-            console.log('-> [DATABASE] Terhubung ke MySQL');
-            // Tabel untuk fitur hapus pesan (dibuat otomatis kalau belum ada)
-            return pool.query(
-                `CREATE TABLE IF NOT EXISTS message_hidden (
-                    user_id VARCHAR(30) NOT NULL,
-                    message_id INT NOT NULL,
-                    PRIMARY KEY (user_id, message_id),
-                    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
-                )`
-            ).then(() => console.log('-> [DATABASE] Tabel message_hidden siap'));
-        })
-        .catch((err) => console.error(`-> [DATABASE] Gagal: ${err.code || ''} ${err.message || ''}`.trim(), err.errors ? err.errors.map((e) => e.code).join(', ') : ''));
+    try {
+        await db.command({ ping: 1 });
+        console.log(`-> [DATABASE] Terhubung ke MongoDB (database: ${DB_NAME})`);
+        // Index agar pencarian cepat dan ID/email tidak bisa dobel
+        await users.createIndex({ user_id: 1 }, { unique: true });
+        await users.createIndex({ email: 1 }, { unique: true });
+        await messages.createIndex({ sender_id: 1 });
+        await messages.createIndex({ receiver_id: 1 });
+        await hidden.createIndex({ user_id: 1, message_id: 1 }, { unique: true });
+        console.log('-> [DATABASE] Index siap');
+    } catch (err) {
+        console.error(`-> [DATABASE] Gagal terhubung: ${err.name} ${err.message}`);
+        console.error('   Cek MONGODB_URI di backend/.env dan Network Access di MongoDB Atlas.');
+    }
 });
