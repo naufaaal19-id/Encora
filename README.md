@@ -4,7 +4,8 @@ Aplikasi chat **real-time** untuk simulasi komunikasi data. Pesan diubah menjadi
 (framing 10 bit + parity), lalu divisualisasikan sebagai sinyal **NRZ-L**. Pesan hanya bisa
 dibaca setelah memasukkan kunci akun.
 
-- **Backend:** Node.js, Express, Socket.IO, MySQL (`mysql2`)
+- **Backend:** Node.js, Express, Socket.IO, MongoDB (driver `mongodb`)
+- **Database:** MongoDB Atlas (cloud, paket gratis M0 cukup)
 - **Frontend:** HTML, CSS, JavaScript (vanilla) + Socket.IO client
 - **Real-time:** WebSocket lewat Socket.IO
 
@@ -15,14 +16,12 @@ Encora/
 ├── backend/
 │   ├── server.js
 │   ├── package.json
-│   └── .env.example
-├── database/
-│   └── schema.sql
+│   └── .env              # dibuat sendiri, tidak ikut ke GitHub
 ├── frontend/
 │   ├── index.html
 │   ├── script.js
 │   ├── style.css
-│   └── crypto-js.min.js
+│   └── config.js         # alamat backend (kosong = satu server dengan frontend)
 ├── .vscode/
 │   └── launch.json
 ├── .gitignore
@@ -32,18 +31,26 @@ Encora/
 ## Prasyarat
 
 - [Node.js](https://nodejs.org) versi 18 atau lebih baru (pilih versi LTS)
-- MySQL (Laragon atau XAMPP)
+- Akun [MongoDB Atlas](https://www.mongodb.com/cloud/atlas) (gratis)
 - VS Code dan Git
 
 Cek instalasi dengan `node -v`, `npm -v`, dan `git --version` di terminal.
 
-## 1. Siapkan Database
+## 1. Siapkan Database (MongoDB Atlas)
 
-1. Jalankan MySQL (Laragon: klik **Start All**).
-2. Buka HeidiSQL atau phpMyAdmin, lalu jalankan seluruh isi `database/schema.sql`.
-   File ini membuat database `Encora_db` beserta tabel `users` dan `messages`.
+1. Buat cluster gratis (M0) di MongoDB Atlas.
+2. **Security > Database Access:** buat user database dengan password.
+   Gunakan huruf dan angka saja supaya password tidak perlu di-encode.
+3. **Security > Network Access > Add IP Address:** pilih **Allow access from anywhere**
+   (`0.0.0.0/0`), lalu Confirm. Tanpa ini, server akan gagal terhubung.
+4. **Database > Connect > Drivers:** salin connection string, bentuknya:
 
-> **Peringatan:** `schema.sql` memuat `DROP TABLE`. Menjalankannya ulang menghapus semua data lama.
+   ```text
+   mongodb+srv://USER:PASSWORD@cluster.xxxxx.mongodb.net/?retryWrites=true&w=majority
+   ```
+
+Koleksi `users`, `messages`, dan `message_hidden` beserta index-nya dibuat **otomatis**
+saat server pertama kali jalan. Tidak ada skema yang perlu diimpor.
 
 ## 2. Siapkan Backend
 
@@ -54,13 +61,16 @@ cd backend
 npm install
 ```
 
-Salin `.env.example` menjadi `.env`:
+Buat file `backend/.env` dengan isi berikut, lalu ganti `USER` dan `PASSWORD`
+sesuai connection string kamu:
 
-- Windows (CMD): `copy .env.example .env`
-- PowerShell / Linux / macOS: `cp .env.example .env`
+```env
+PORT=5000
+MONGODB_URI=mongodb+srv://USER:PASSWORD@cluster.xxxxx.mongodb.net/?retryWrites=true&w=majority
+DB_NAME=encora
+```
 
-Buka `.env` dan sesuaikan `DB_USER` / `DB_PASSWORD` bila MySQL kamu tidak memakai
-`root` dengan password kosong (default Laragon).
+> Jangan memakai tanda kutip di sekitar nilai `MONGODB_URI`.
 
 ## 3. Jalankan Server
 
@@ -75,7 +85,8 @@ Jika berhasil, terminal menampilkan:
 
 ```text
 Encora berjalan di http://localhost:5000
--> [DATABASE] Terhubung ke MySQL
+-> [DATABASE] Terhubung ke MongoDB (database: encora)
+-> [DATABASE] Index siap
 ```
 
 Buka **http://localhost:5000** di browser.
@@ -86,6 +97,8 @@ Buka **http://localhost:5000** di browser.
 2. Buka **jendela Incognito** dan login dengan akun kedua.
 3. Klik **Tambah Teman via ID**, masukkan ID akun kedua, lalu kirim pesan.
 4. Klik **Masukkan kunci untuk melihat pesan** dan isi kunci akunmu.
+
+Data akun bisa dilihat di Atlas lewat **Browse Collections > encora > users**.
 
 ## Cara Kerja Encoding
 
@@ -100,32 +113,68 @@ ulang di browser untuk digambar dan di-decode.
 
 ## Upload ke GitHub
 
-1. Buat repository **kosong** di https://github.com/new (nama misalnya `encora`, jangan centang
-   "Add a README").
-2. Di terminal, dari folder utama `Encora/`:
+Dari folder utama proyek:
+
+```bash
+git add -A
+git status
+git commit -m "Pesan commit kamu"
+git push
+```
+
+Sebelum commit, pastikan `git status` **tidak** menampilkan `.env` atau `node_modules/`
+(keduanya sudah diatur di `.gitignore`). File `.env` berisi password database.
+
+Untuk repository baru, buat repository **kosong** di https://github.com/new, lalu:
 
 ```bash
 git init
+git branch -M main
+git remote add origin https://github.com/USERNAME/Encora.git
 git add .
 git commit -m "Initial commit: Encora"
-git branch -M main
-git remote add origin https://github.com/USERNAME/encora.git
 git push -u origin main
 ```
 
-Ganti `USERNAME` dengan username GitHub kamu. Saat `git push`, login lewat jendela browser
-yang muncul. Jika diminta password, pakai *Personal Access Token*, bukan password akun.
+Saat `git push`, login lewat jendela browser yang muncul. Jika diminta password, pakai
+*Personal Access Token*, bukan password akun.
 
-Pastikan `.env` dan `node_modules/` tidak ikut ter-upload (sudah diatur di `.gitignore`).
+## Deploy Online
 
-> GitHub hanya menyimpan kode. GitHub Pages tidak bisa menjalankan Node.js dan MySQL, jadi aplikasi
-> ini tidak akan hidup di sana. Untuk online, deploy ke layanan seperti Render atau Railway
-> dengan database MySQL cloud, dan isi `PORT`, `DB_*` lewat environment variables.
+> **Penting:** Encora memakai Socket.IO, yang butuh server Node.js yang **hidup terus-menerus**.
+> **Vercel (serverless) tidak bisa menjalankan server seperti ini**, begitu juga GitHub Pages.
+> Frontend akan tampil, tetapi daftar, login, dan chat tidak akan berfungsi.
+
+Gunakan layanan yang mendukung server Node.js persisten dan WebSocket, misalnya Render,
+Railway, Fly.io, atau Hugging Face Spaces (Docker). Syarat paket gratis dan kebutuhan
+kartu pembayaran berbeda-beda dan bisa berubah, jadi cek langsung di situs masing-masing.
+
+Pengaturan umum:
+
+- Build command: `cd backend && npm install`
+- Start command: `cd backend && npm start`
+- Environment variables: `MONGODB_URI` dan `DB_NAME` (jangan isi `PORT`, platform mengaturnya)
+- MongoDB Atlas harus mengizinkan `0.0.0.0/0` di Network Access, karena IP platform hosting
+  berubah-ubah.
+
+Server yang sama sekaligus menyajikan folder `frontend`, jadi satu layanan sudah cukup.
+
+Jika frontend dan backend ingin dipisah (misalnya frontend di Vercel), isi
+`frontend/config.js` dengan alamat backend:
+
+```js
+window.ENCORA_BACKEND_URL = 'https://alamat-backend-kamu.example.com';
+```
+
+Lalu di backend, isi environment variable `FRONTEND_ORIGIN` dengan alamat frontend
+(contoh: `https://encora.vercel.app`) agar CORS hanya mengizinkan domain itu.
 
 ## Catatan Keamanan
 
 Proyek ini ditujukan untuk belajar, bukan produksi. Sebelum di-hosting publik:
 
 - Password dan kunci disimpan dalam bentuk bit (belum di-hash). Gunakan `bcrypt`.
-- Batasi `cors.origin` di `backend/server.js`.
-- Gunakan HTTPS.
+- Jangan membagikan `MONGODB_URI` atau screenshot yang memperlihatkannya. Jika sudah
+  terlanjur terlihat orang lain, ganti password user di Atlas (**Database Access > Edit**).
+- Atur `FRONTEND_ORIGIN` agar `cors.origin` tidak terbuka untuk semua domain.
+- Gunakan HTTPS (disediakan otomatis oleh sebagian besar platform hosting).
