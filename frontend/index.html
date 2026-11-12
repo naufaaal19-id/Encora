@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Encora Realtime Chat</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <link rel="stylesheet" href="style.css?v=5">
+</head>
+<body>
+
+    <!-- ========== AUTENTIKASI ========== -->
+    <div id="loginScreen" class="auth">
+        <section class="hero">
+            <div class="brand-row"><span class="lg">E</span>Encora</div>
+            <div>
+                <h1>Pesanmu berjalan sebagai gelombang.</h1>
+                <p>Teks diubah jadi bit, lalu digambar sebagai sinyal NRZ-L. Isinya baru terbuka dengan kunci akunmu.</p>
+            </div>
+            <figure>
+                <svg viewBox="0 0 600 120" width="100%" role="img" aria-label="Sinyal NRZ-L untuk huruf A"><path d="M0 90H60V30H120V90H420V30H480V90H540V30H600" fill="none" stroke="#F5A524" stroke-width="4" stroke-linejoin="round"/></svg>
+                <div class="bits m"><span>0</span><span>1</span><span>0</span><span>0</span><span>0</span><span>0</span><span>0</span><span>1</span><span>0</span><span>1</span></div>
+                <figcaption>Huruf A sebagai satu frame 10 bit: start, 7 bit data, parity, end.</figcaption>
+            </figure>
+        </section>
+
+        <main class="fw">
+            <form id="loginForm" class="form" novalidate>
+                <div class="mb"><span class="lg">E</span>Encora</div>
+                <div><h2>Masuk ke Encora</h2><p class="meta lead">Pakai email dan password akunmu.</p></div>
+                <p id="loginNote" class="note" role="status" hidden>Akun berhasil dibuat. Silakan masuk.</p>
+                <label class="fld">Alamat email<input id="loginEmailInput" class="in" type="email" autocomplete="email"></label>
+                <label class="fld">Password<input id="loginPasswordInput" class="in" type="password" autocomplete="current-password"></label>
+                <div id="loginErr" class="err" role="alert"></div>
+                <button class="btn" type="submit">Masuk</button>
+                <p class="meta lead">Belum punya akun? <button id="toRegisterBtn" class="lnk" type="button">Daftar di sini</button></p>
+            </form>
+
+            <form id="registerForm" class="form wide" hidden novalidate>
+                <div class="mb"><span class="lg">E</span>Encora</div>
+                <div><h2>Buat akun Encora</h2><p class="meta lead">Isi data di bawah, lalu masuk dan mulai chat.</p></div>
+                <div class="g2">
+                    <label class="fld">Nama lengkap<input id="regNameInput" class="in" type="text" autocomplete="name"></label>
+                    <label class="fld">ID unik<input id="regUserIdInput" class="in" type="text" autocomplete="username" autocapitalize="none"><small>Contoh: encora_123</small></label>
+                    <label class="fld sp">Alamat email<input id="regEmailInput" class="in" type="email" autocomplete="email"></label>
+                    <label class="fld sp">Kunci buka pesan<input id="regKeyInput" class="in" type="password" autocomplete="off"><small>Dipakai untuk membuka isi pesan. Minimal 4 karakter.</small></label>
+                    <label class="fld">Password<input id="regPasswordInput" class="in" type="password" autocomplete="new-password"></label>
+                    <label class="fld">Ulangi password<input id="regPasswordConfirmInput" class="in" type="password" autocomplete="new-password"></label>
+                </div>
+                <div id="regErr" class="err" role="alert"></div>
+                <button class="btn" type="submit">Buat akun</button>
+                <p class="meta lead">Sudah punya akun? <button id="toLoginBtn" class="lnk" type="button">Masuk</button></p>
+            </form>
+        </main>
+    </div>
+
+    <!-- ========== APLIKASI UTAMA ========== -->
+    <main id="mainApp" class="app" data-v="list" hidden>
+        <aside class="side">
+            <div class="sbar">
+                <button id="menuBtn" class="ib" type="button" aria-label="Menu" aria-haspopup="true" aria-expanded="false"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+                <input id="searchInput" class="sq" type="search" placeholder="Cari kontak" aria-label="Cari kontak">
+            </div>
+            <div id="menu" class="menu" role="menu" hidden>
+                <button id="changeKeyBtn" class="mi" type="button" role="menuitem">Ganti kunci buka pesan</button>
+                <button id="logoutBtn" class="mi" type="button" role="menuitem">Keluar</button>
+            </div>
+            <div id="contactList" class="list"></div>
+            <p id="contactNone" class="meta pad" hidden></p>
+            <button id="addContactBtn" class="fab" type="button" aria-label="Tambah teman lewat ID"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:24px;height:24px"><path d="M12 5v14M5 12h14"/></svg></button>
+            <div class="meb"><span id="myAvatar" class="av me-av"></span><div><strong id="myName"></strong><div id="myIdDisplay" class="m meta"></div></div></div>
+        </aside>
+
+        <section class="pane">
+            <div id="blank" class="blank"><div class="empty"><strong>Pilih percakapan</strong><div class="meta">Atau tambah teman lewat ID dengan tombol +.</div></div></div>
+            <div id="chatView" class="chat" hidden>
+                <header class="hd">
+                    <button id="backBtn" class="ib back" type="button" aria-label="Kembali ke daftar chat"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+                    <span id="chatAvatar" class="av"></span>
+                    <div><strong id="chatName"></strong><div id="chatStatus" class="meta"></div></div>
+                    <button id="delChatBtn" class="ib push" type="button" aria-label="Hapus chat"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button>
+                </header>
+                <div id="messages" class="msgs" aria-live="polite"></div>
+                <form id="messageForm" class="cmp">
+                    <input id="messageInput" class="cin" type="text" placeholder="Tulis pesan" autocomplete="off" aria-label="Tulis pesan">
+                    <button class="send" type="submit" aria-label="Kirim"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12l16-8-6 16-3-7z"/></svg></button>
+                </form>
+            </div>
+        </section>
+    </main>
+
+    <!-- ========== DIALOG ========== -->
+    <div id="addDlg" class="scrim" hidden><form id="addForm" class="card" role="dialog" aria-modal="true" aria-label="Tambah teman lewat ID" novalidate>
+        <h3>Tambah teman lewat ID</h3>
+        <label class="fld">ID teman<input id="addInput" class="in" type="text" placeholder="encora_123" autocapitalize="none" autocomplete="off"></label>
+        <div id="addErr" class="err" role="alert"></div>
+        <div class="acts"><button class="btn ghost" type="button" data-close>Batal</button><button class="btn" type="submit">Tambah</button></div>
+    </form></div>
+
+    <div id="keyDlg" class="scrim" hidden><form id="keyForm" class="card" role="dialog" aria-modal="true" aria-label="Buka pesan" novalidate>
+        <h3>Buka pesan</h3>
+        <label class="fld">Kunci akunmu<input id="keyInput" class="in" type="password" autocomplete="off"></label>
+        <div id="keyErr" class="err" role="alert"></div>
+        <div class="acts"><button class="btn ghost" type="button" data-close>Batal</button><button class="btn" type="submit">Buka</button></div>
+    </form></div>
+
+    <div id="chgDlg" class="scrim" hidden><form id="chgForm" class="card" role="dialog" aria-modal="true" aria-label="Ganti kunci buka pesan" novalidate>
+        <h3>Ganti kunci buka pesan</h3>
+        <label class="fld">Kunci lama<input id="oldKeyInput" class="in" type="password" autocomplete="off"></label>
+        <label class="fld">Kunci baru<input id="newKeyInput" class="in" type="password" autocomplete="off"><small>Minimal 4 karakter.</small></label>
+        <div id="chgErr" class="err" role="alert"></div>
+        <div class="acts"><button class="btn ghost" type="button" data-close>Batal</button><button class="btn" type="submit">Simpan kunci</button></div>
+    </form></div>
+
+    <div id="delDlg" class="scrim" hidden><div class="card" role="dialog" aria-modal="true" aria-labelledby="delTitle">
+        <h3 id="delTitle"></h3>
+        <p id="delText" class="meta lead"></p>
+        <div class="acts"><button class="btn ghost" type="button" data-close>Batal</button><button id="delOk" class="btn danger" type="button">Hapus</button></div>
+    </div></div>
+
+    <div id="toast" role="status" hidden></div>
+
+    <script src="script.js?v=5"></script>
+</body>
+</html>
