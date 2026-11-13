@@ -1,68 +1,64 @@
 # Encora
 
-Aplikasi chat **real-time** untuk simulasi komunikasi data. Pesan diubah menjadi bit
+Aplikasi chat **hampir real-time** untuk simulasi komunikasi data. Pesan diubah menjadi bit
 (framing 10 bit + parity), lalu divisualisasikan sebagai sinyal **NRZ-L**. Pesan hanya bisa
 dibaca setelah memasukkan kunci akun.
 
-- **Backend:** Node.js, Express, Socket.IO, MongoDB (driver `mongodb`)
-- **Database:** MongoDB Atlas (cloud, paket gratis M0 cukup)
-- **Frontend:** HTML, CSS, JavaScript (vanilla) + Socket.IO client
-- **Real-time:** WebSocket lewat Socket.IO
+- **Hosting:** Vercel (frontend statis + Serverless Functions)
+- **Database:** MongoDB Atlas (paket gratis M0 cukup)
+- **Frontend:** HTML, CSS, JavaScript (vanilla)
+- **Komunikasi:** HTTP + polling tiap 2 detik (Vercel tidak mendukung WebSocket/Socket.IO)
 
 ## Struktur Folder
 
 ```text
 Encora/
-├── backend/
-│   ├── server.js
-│   ├── package.json
-│   └── .env              # dibuat sendiri, tidak ikut ke GitHub
+├── api/
+│   ├── emit.js        # menangani aksi: daftar, login, kirim pesan, dll.
+│   └── poll.js        # polling pesan baru + daftar user online
+├── lib/
+│   └── encora.js      # logika server + koneksi MongoDB
 ├── frontend/
 │   ├── index.html
 │   ├── script.js
-│   ├── style.css
-│   └── config.js         # alamat backend (kosong = satu server dengan frontend)
-├── .vscode/
-│   └── launch.json
+│   ├── http-socket.js # pengganti Socket.IO (HTTP + polling)
+│   └── style.css
+├── backend/
+│   ├── server.js      # server LOKAL untuk tes di komputer (tidak dipakai Vercel)
+│   └── .env           # dibuat sendiri, tidak ikut ke GitHub
+├── .vscode/launch.json
+├── package.json
+├── vercel.json
 ├── .gitignore
 └── README.md
 ```
 
 ## Prasyarat
 
-- [Node.js](https://nodejs.org) versi 18 atau lebih baru (pilih versi LTS)
-- Akun [MongoDB Atlas](https://www.mongodb.com/cloud/atlas) (gratis)
+- [Node.js](https://nodejs.org) versi 18 atau lebih baru (pilih LTS)
+- Akun [MongoDB Atlas](https://www.mongodb.com/cloud/atlas) dan akun [Vercel](https://vercel.com)
 - VS Code dan Git
 
-Cek instalasi dengan `node -v`, `npm -v`, dan `git --version` di terminal.
+## 1. Siapkan MongoDB Atlas
 
-## 1. Siapkan Database (MongoDB Atlas)
+1. Buat cluster gratis (M0).
+2. **Security > Database Access:** buat user database dengan password (huruf dan angka saja).
+3. **Security > Network Access:** tambahkan `0.0.0.0/0` (Allow access from anywhere).
+   Vercel memakai IP yang berubah-ubah, jadi ini wajib.
+4. **Database > Connect > Drivers:** salin connection string.
 
-1. Buat cluster gratis (M0) di MongoDB Atlas.
-2. **Security > Database Access:** buat user database dengan password.
-   Gunakan huruf dan angka saja supaya password tidak perlu di-encode.
-3. **Security > Network Access > Add IP Address:** pilih **Allow access from anywhere**
-   (`0.0.0.0/0`), lalu Confirm. Tanpa ini, server akan gagal terhubung.
-4. **Database > Connect > Drivers:** salin connection string, bentuknya:
+Koleksi `users`, `messages`, dan `message_hidden` beserta index-nya dibuat otomatis
+saat ada request pertama.
 
-   ```text
-   mongodb+srv://USER:PASSWORD@cluster.xxxxx.mongodb.net/?retryWrites=true&w=majority
-   ```
+## 2. Tes di Komputer
 
-Koleksi `users`, `messages`, dan `message_hidden` beserta index-nya dibuat **otomatis**
-saat server pertama kali jalan. Tidak ada skema yang perlu diimpor.
-
-## 2. Siapkan Backend
-
-Di terminal VS Code (**Terminal > New Terminal**):
+Dari folder utama proyek (bukan `backend`):
 
 ```bash
-cd backend
 npm install
 ```
 
-Buat file `backend/.env` dengan isi berikut, lalu ganti `USER` dan `PASSWORD`
-sesuai connection string kamu:
+Buat file `backend/.env`:
 
 ```env
 PORT=5000
@@ -70,111 +66,73 @@ MONGODB_URI=mongodb+srv://USER:PASSWORD@cluster.xxxxx.mongodb.net/?retryWrites=t
 DB_NAME=encora
 ```
 
-> Jangan memakai tanda kutip di sekitar nilai `MONGODB_URI`.
+> Jangan memakai tanda kutip di sekitar `MONGODB_URI`.
 
-## 3. Jalankan Server
+Jalankan:
 
 ```bash
 npm start
 ```
 
-Atau tekan **F5** di VS Code dan pilih **"Encora: Jalankan Server"**.
-Untuk auto-restart saat kode berubah: `npm run dev`.
+Buka **http://localhost:5000**. Atau tekan **F5** di VS Code dan pilih
+**"Encora: Jalankan Server"**.
 
-Jika berhasil, terminal menampilkan:
+## 3. Deploy ke Vercel
 
-```text
-Encora berjalan di http://localhost:5000
--> [DATABASE] Terhubung ke MongoDB (database: encora)
--> [DATABASE] Index siap
-```
+1. Push kode ke GitHub, lalu import repository di Vercel (**Add New > Project**).
+2. Pengaturan proyek:
+   - **Framework Preset:** Other
+   - **Root Directory:** kosongkan
+   - Build/Output sudah diatur oleh `vercel.json` (output: folder `frontend`).
+3. **Settings > Environment Variables:**
+   - `MONGODB_URI` = connection string Atlas (tanpa tanda kutip)
+   - `DB_NAME` = `encora`
+   - `SESSION_SECRET` (opsional) = teks acak panjang untuk menandatangani sesi login
+4. **Deployments > Redeploy** setelah mengubah environment variables.
 
-Buka **http://localhost:5000** di browser.
+Setiap `git push` ke branch `main` otomatis memicu deploy ulang.
 
-## 4. Mencoba Chat
+## Mencoba Chat
 
 1. Daftar akun baru, lalu login.
-2. Buka **jendela Incognito** dan login dengan akun kedua.
+2. Di perangkat/jendela Incognito lain, daftar dan login dengan akun kedua.
 3. Klik **Tambah Teman via ID**, masukkan ID akun kedua, lalu kirim pesan.
-4. Klik **Masukkan kunci untuk melihat pesan** dan isi kunci akunmu.
-
-Data akun bisa dilihat di Atlas lewat **Browse Collections > encora > users**.
+4. Pesan muncul di sisi penerima dalam sekitar 2 detik.
+5. Klik **Masukkan kunci untuk melihat pesan** dan isi kunci akunmu.
 
 ## Cara Kerja Encoding
 
 1. Teks diubah ke ASCII 7 bit.
 2. Tiap karakter dibungkus frame 10 bit: `Start (0) + 7 bit data + Even Parity + End (1)`.
-3. Bit diubah menjadi sinyal **NRZ-L**: bit `1` = level **High**, bit `0` = level **Low**.
+3. Bit diubah menjadi sinyal **NRZ-L**: bit `1` = **High**, bit `0` = **Low**.
 
 Contoh huruf `A`: frame `0100000101`, sinyal NRZ-L `L H L L L L L H L H`.
 
-Yang dikirim ke server dan disimpan di database adalah string bit. Sinyal NRZ-L dihitung
-ulang di browser untuk digambar dan di-decode.
+Yang dikirim ke server dan disimpan adalah string bit. Sinyal NRZ-L dihitung ulang
+di browser untuk digambar dan di-decode.
 
-## Upload ke GitHub
+## Cara Kerja Komunikasi
 
-Dari folder utama proyek:
+Server serverless tidak menyimpan koneksi terbuka, jadi:
 
-```bash
-git add -A
-git status
-git commit -m "Pesan commit kamu"
-git push
-```
+- Aksi (daftar, login, kirim pesan, ganti kunci, hapus pesan) dikirim lewat `POST /api/emit`.
+- Browser menanyakan pesan baru dan daftar user online lewat `POST /api/poll`
+  (tiap 2 detik; tiap 8 detik jika tab tidak aktif).
+- Setelah login, server memberi token sesi bertanda tangan (berlaku 12 jam).
+- User dianggap online jika aktif dalam 20 detik terakhir.
 
-Sebelum commit, pastikan `git status` **tidak** menampilkan `.env` atau `node_modules/`
-(keduanya sudah diatur di `.gitignore`). File `.env` berisi password database.
+## Pemecahan Masalah
 
-Untuk repository baru, buat repository **kosong** di https://github.com/new, lalu:
-
-```bash
-git init
-git branch -M main
-git remote add origin https://github.com/USERNAME/Encora.git
-git add .
-git commit -m "Initial commit: Encora"
-git push -u origin main
-```
-
-Saat `git push`, login lewat jendela browser yang muncul. Jika diminta password, pakai
-*Personal Access Token*, bukan password akun.
-
-## Deploy Online
-
-> **Penting:** Encora memakai Socket.IO, yang butuh server Node.js yang **hidup terus-menerus**.
-> **Vercel (serverless) tidak bisa menjalankan server seperti ini**, begitu juga GitHub Pages.
-> Frontend akan tampil, tetapi daftar, login, dan chat tidak akan berfungsi.
-
-Gunakan layanan yang mendukung server Node.js persisten dan WebSocket, misalnya Render,
-Railway, Fly.io, atau Hugging Face Spaces (Docker). Syarat paket gratis dan kebutuhan
-kartu pembayaran berbeda-beda dan bisa berubah, jadi cek langsung di situs masing-masing.
-
-Pengaturan umum:
-
-- Build command: `cd backend && npm install`
-- Start command: `cd backend && npm start`
-- Environment variables: `MONGODB_URI` dan `DB_NAME` (jangan isi `PORT`, platform mengaturnya)
-- MongoDB Atlas harus mengizinkan `0.0.0.0/0` di Network Access, karena IP platform hosting
-  berubah-ubah.
-
-Server yang sama sekaligus menyajikan folder `frontend`, jadi satu layanan sudah cukup.
-
-Jika frontend dan backend ingin dipisah (misalnya frontend di Vercel), isi
-`frontend/config.js` dengan alamat backend:
-
-```js
-window.ENCORA_BACKEND_URL = 'https://alamat-backend-kamu.example.com';
-```
-
-Lalu di backend, isi environment variable `FRONTEND_ORIGIN` dengan alamat frontend
-(contoh: `https://encora.vercel.app`) agar CORS hanya mengizinkan domain itu.
+- **"Server tidak terhubung ke database!"**: `MONGODB_URI` salah/kosong, password salah,
+  atau Network Access Atlas belum `0.0.0.0/0`. Lihat **Vercel > Logs** untuk detailnya.
+- **Halaman 404 / `/api` tidak ditemukan di Vercel**: pastikan Root Directory kosong dan
+  `vercel.json` ikut ter-push.
+- **Pesan tidak masuk ke penerima**: tunggu 2 detik; pastikan penerima sudah login.
 
 ## Catatan Keamanan
 
-Proyek ini ditujukan untuk belajar, bukan produksi. Sebelum di-hosting publik:
+Proyek ini untuk belajar, bukan produksi:
 
 - Password dan kunci disimpan dalam bentuk bit (belum di-hash). Gunakan `bcrypt`.
-- Jangan membagikan `MONGODB_URI` atau screenshot yang memperlihatkannya. Jika sudah
-  terlanjur terlihat orang lain, ganti password user di Atlas (**Database Access > Edit**).
-- Atur `FRONTEND_ORIGIN` agar `cors.origin` tidak terbuka untuk semua domain.
-- Gunakan HTTPS (disediakan otomatis oleh sebagian besar platform hosting).
+- Jangan membagikan `MONGODB_URI`. Jika sempat terlihat orang lain, ganti password user di Atlas.
+- Pastikan `.env` tidak ikut ter-push (sudah ada di `.gitignore`).

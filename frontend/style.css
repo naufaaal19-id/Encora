@@ -109,3 +109,25 @@ button,input{font:inherit}
 @media(max-width:760px){.app{grid-template-columns:1fr}.app[data-v="list"] .pane{display:none}.app[data-v="chat"] .side{display:none}.back{display:grid}.side{border-right:0}.msgs{padding:16px 12px}.cmp{padding:0 12px 12px}}
 @media(prefers-reduced-motion:reduce){.bs{opacity:1}.tr{display:none}}
 @media(prefers-reduced-motion:no-preference){.grp{animation:pop .18s ease-out}@keyframes pop{from{opacity:0;transform:translateY(6px)}}.sig{scrollbar-width:none}.sig::-webkit-scrollbar{display:none}}
+
+.btn.busy{cursor:progress;opacity:.85}
+.btn.busy::before{content:"";display:inline-block;width:14px;height:14px;margin-right:8px;vertical-align:-2px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.row{transition:background .15s,transform .1s}
+.row:active{transform:scale(.98)}
+.chat{position:relative}
+@media(prefers-reduced-motion:no-preference){
+.app.enter{animation:appIn .35s ease-out}
+.chat.enter{animation:chatIn .26s ease-out}
+.chat.enter::before{content:"";position:absolute;z-index:2;top:0;left:0;right:0;height:3px;background:var(--amb);transform-origin:left;animation:bar .7s ease-out forwards}
+.chat.enter .msgs>*{animation:rise .32s ease-out both}
+.chat.enter .msgs>*:nth-child(2){animation-delay:.06s}
+.chat.enter .msgs>*:nth-child(3){animation-delay:.12s}
+.chat.enter .msgs>*:nth-child(4){animation-delay:.18s}
+.chat.enter .msgs>*:nth-child(5){animation-delay:.24s}
+.chat.enter .msgs>*:nth-child(n+6){animation-delay:.3s}
+@keyframes appIn{from{opacity:0;transform:scale(.985)}}
+@keyframes chatIn{from{opacity:0;transform:translateX(18px)}}
+@keyframes rise{from{opacity:0;transform:translateY(10px)}}
+@keyframes bar{0%{transform:scaleX(0);opacity:1}70%{transform:scaleX(1);opacity:1}100%{transform:scaleX(1);opacity:0}}
+}

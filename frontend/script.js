@@ -1,7 +1,6 @@
 'use strict';
 // Encora - frontend (HTML + CSS + JavaScript vanilla + Socket.IO client)
-// Kosongkan ENCORA_BACKEND_URL (frontend/config.js) kalau frontend & backend satu server.
-const socket = window.ENCORA_BACKEND_URL ? io(window.ENCORA_BACKEND_URL) : io();
+const socket = window.createHttpSocket();   // HTTP + polling (lihat http-socket.js)
 
 // ==========================================
 // KONSTANTA & STATE
@@ -101,6 +100,25 @@ function showForm(which) {
 $('#toRegisterBtn').addEventListener('click', () => { $('#regErr').textContent = ''; showForm('register'); });
 $('#toLoginBtn').addEventListener('click', () => { $('#loginNote').hidden = true; showForm('login'); });
 
+// Status "sedang memproses" + animasi supaya jelas tombolnya sudah ditekan
+function replay(el, cls) { el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }
+let busyTimer = null;
+function setBusy(form, on, text) {
+    const b = form.querySelector('button[type="submit"]');
+    if (!b) return;
+    if (on) { b.dataset.label = b.textContent; b.textContent = text; b.classList.add('busy'); b.disabled = true; }
+    else if (b.dataset.label) { b.textContent = b.dataset.label; b.classList.remove('busy'); b.disabled = false; delete b.dataset.label; }
+}
+function startBusy(form, text) {
+    setBusy(form, true, text);
+    clearTimeout(busyTimer);
+    busyTimer = setTimeout(() => {
+        setBusy(form, false);
+        (form === loginForm ? $('#loginErr') : $('#regErr')).textContent = 'Server lama merespons. Coba lagi sebentar.';
+    }, 20000);
+}
+function stopBusy() { clearTimeout(busyTimer); setBusy(loginForm, false); setBusy(registerForm, false); }
+
 loginForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const rawEmail = $('#loginEmailInput').value.trim();
@@ -108,6 +126,8 @@ loginForm.addEventListener('submit', (e) => {
     if (!rawEmail || !rawPassword) { $('#loginErr').textContent = 'Isi email dan password.'; return; }
     if (!socket.connected) { $('#loginErr').textContent = 'Belum terhubung ke server. Coba lagi sebentar.'; return; }
     $('#loginErr').textContent = '';
+    if (loginForm.querySelector('button.busy')) return;
+    startBusy(loginForm, 'Masuk…');
     socket.emit('login_account', {
         email: textToCombinedBinaryString(rawEmail),
         password: textToCombinedBinaryString(rawPassword)
@@ -131,6 +151,8 @@ registerForm.addEventListener('submit', (e) => {
     else if (!socket.connected) m = 'Belum terhubung ke server. Coba lagi sebentar.';
     $('#regErr').textContent = m;
     if (m) return;
+    if (registerForm.querySelector('button.busy')) return;
+    startBusy(registerForm, 'Membuat akun…');
     socket.emit('register_account', {
         user_id, user_name,
         email: textToCombinedBinaryString(rawEmail),
@@ -140,6 +162,7 @@ registerForm.addEventListener('submit', (e) => {
 });
 
 socket.on('auth_response', (data) => {
+    stopBusy();
     if (data.status === 'error') {
         (registerForm.hidden ? $('#loginErr') : $('#regErr')).textContent = data.message;
         return;
@@ -175,6 +198,7 @@ function startSession(data) {
 
     $('#loginScreen').hidden = true;
     $('#mainApp').hidden = false;
+    replay($('#mainApp'), 'enter');
     $('#myName').textContent = myUserName;
     $('#myAvatar').textContent = myUserName.charAt(0).toUpperCase();
     $('#myIdDisplay').textContent = myUserId;
@@ -258,6 +282,7 @@ function selectContact(id) {
     updateHeader();
     renderContacts();
     renderChat();
+    replay($('#chatView'), 'enter');
     if (innerWidth > 760) $('#messageInput').focus();
 }
 $('#contactList').addEventListener('click', (e) => {
