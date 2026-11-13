@@ -7,30 +7,31 @@ dibaca setelah memasukkan kunci akun.
 - **Hosting:** Vercel (frontend statis + Serverless Functions)
 - **Database:** MongoDB Atlas (paket gratis M0 cukup)
 - **Frontend:** HTML, CSS, JavaScript (vanilla)
-- **Komunikasi:** HTTP + polling tiap 2 detik (Vercel tidak mendukung WebSocket/Socket.IO)
+- **Komunikasi:** HTTP + polling tiap 2 detik 
 
 ## Struktur Folder
 
 ```text
 Encora/
+├── .vscode/launch.json
 ├── api/
 │   ├── emit.js        # menangani aksi: daftar, login, kirim pesan, dll.
 │   └── poll.js        # polling pesan baru + daftar user online
-├── lib/
-│   └── encora.js      # logika server + koneksi MongoDB
 ├── frontend/
+│   ├── http-socket.js # HTTP + polling
 │   ├── index.html
 │   ├── script.js
-│   ├── http-socket.js # pengganti Socket.IO (HTTP + polling)
 │   └── style.css
-├── backend/
-│   ├── server.js      # server LOKAL untuk tes di komputer (tidak dipakai Vercel)
-│   └── .env           # dibuat sendiri, tidak ikut ke GitHub
-├── .vscode/launch.json
-├── package.json
-├── vercel.json
+├── lib/
+│   └── encora.js      # logika server + koneksi MongoDB
+├── local/
+│   ├── .env           # dibuat sendiri, tidak ikut ke GitHub
+│   └── server.js      # server LOKAL untuk tes di komputer (tidak dipakai Vercel)
 ├── .gitignore
-└── README.md
+├── package-lock.json
+├── package.json
+├── README.md
+└── vercel.json
 ```
 
 ## Prasyarat
@@ -52,13 +53,13 @@ saat ada request pertama.
 
 ## 2. Tes di Komputer
 
-Dari folder utama proyek (bukan `backend`):
+Dari folder utama proyek (bukan `local`):
 
 ```bash
 npm install
 ```
 
-Buat file `backend/.env`:
+Buat file `local/.env`:
 
 ```env
 PORT=5000

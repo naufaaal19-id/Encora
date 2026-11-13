@@ -5,8 +5,8 @@
             "name": "Encora: Jalankan Server",
             "type": "node",
             "request": "launch",
-            "program": "${workspaceFolder}/backend/server.js",
-            "cwd": "${workspaceFolder}/backend",
+            "program": "${workspaceFolder}/local/server.js",
+            "cwd": "${workspaceFolder}/local",
             "console": "integratedTerminal"
         }
     ]
