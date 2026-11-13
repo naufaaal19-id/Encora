@@ -13,5 +13,5 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 .idea/
-# Template Vercel yang tidak dipakai
+# Folder bawaan template Vercel (tidak dipakai)
 my-mongodb-app/
