@@ -5,9 +5,9 @@ Aplikasi chat **real-time** untuk simulasi komunikasi data. Pesan diubah menjadi
 dibaca setelah memasukkan kunci akun.
 
 - **Hosting:** Vercel (frontend statis + Serverless Functions)
-- **Database:** MongoDB Atlas (paket gratis M0 cukup)
+- **Database:** MongoDB Atlas 
 - **Frontend:** HTML, CSS, JavaScript (vanilla)
-- **Komunikasi:** HTTP + Pusher Channels (real-time). Tanpa Pusher, otomatis polling tiap 2 detik(Vercel tidak mendukung WebSocket/Socket.IO)
+- **Komunikasi:** HTTP + Pusher Channels (real-time)
 
 ## Struktur Folder
 
@@ -22,7 +22,7 @@ Encora/
 ├── frontend/
 │   ├── index.html
 │   ├── script.js
-│   ├── http-socket.js # pengganti Socket.IO (HTTP + polling)
+│   ├── http-socket.js # HTTP + polling
 │   └── style.css
 ├── local/
 │   ├── server.js      # server LOKAL untuk tes di komputer (tidak dipakai Vercel)
