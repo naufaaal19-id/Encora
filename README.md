@@ -1,37 +1,37 @@
 # Encora
 
-Aplikasi chat **hampir real-time** untuk simulasi komunikasi data. Pesan diubah menjadi bit
+Aplikasi chat **real-time** untuk simulasi komunikasi data. Pesan diubah menjadi bit
 (framing 10 bit + parity), lalu divisualisasikan sebagai sinyal **NRZ-L**. Pesan hanya bisa
 dibaca setelah memasukkan kunci akun.
 
 - **Hosting:** Vercel (frontend statis + Serverless Functions)
 - **Database:** MongoDB Atlas (paket gratis M0 cukup)
 - **Frontend:** HTML, CSS, JavaScript (vanilla)
-- **Komunikasi:** HTTP + polling tiap 2 detik 
+- **Komunikasi:** HTTP + Pusher Channels (real-time). Tanpa Pusher, otomatis polling tiap 2 detik(Vercel tidak mendukung WebSocket/Socket.IO)
 
 ## Struktur Folder
 
 ```text
 Encora/
-├── .vscode/launch.json
 ├── api/
 │   ├── emit.js        # menangani aksi: daftar, login, kirim pesan, dll.
-│   └── poll.js        # polling pesan baru + daftar user online
-├── frontend/
-│   ├── http-socket.js # HTTP + polling
-│   ├── index.html
-│   ├── script.js
-│   └── style.css
+│   ├── poll.js        # mengambil pesan baru + daftar user online
+│   └── pusher-auth.js # izin subscribe channel Pusher milik user
 ├── lib/
 │   └── encora.js      # logika server + koneksi MongoDB
+├── frontend/
+│   ├── index.html
+│   ├── script.js
+│   ├── http-socket.js # pengganti Socket.IO (HTTP + polling)
+│   └── style.css
 ├── local/
-│   ├── .env           # dibuat sendiri, tidak ikut ke GitHub
-│   └── server.js      # server LOKAL untuk tes di komputer (tidak dipakai Vercel)
-├── .gitignore
-├── package-lock.json
+│   ├── server.js      # server LOKAL untuk tes di komputer (tidak dipakai Vercel)
+│   └── .env           # dibuat sendiri, tidak ikut ke GitHub
+├── .vscode/launch.json
 ├── package.json
-├── README.md
-└── vercel.json
+├── vercel.json
+├── .gitignore
+└── README.md
 ```
 
 ## Prasyarat
@@ -89,16 +89,41 @@ Buka **http://localhost:5000**. Atau tekan **F5** di VS Code dan pilih
    - `MONGODB_URI` = connection string Atlas (tanpa tanda kutip)
    - `DB_NAME` = `encora`
    - `SESSION_SECRET` (opsional) = teks acak panjang untuk menandatangani sesi login
+   - `PUSHER_APP_ID`, `PUSHER_KEY`, `PUSHER_SECRET`, `PUSHER_CLUSTER` (untuk real-time, lihat bagian berikutnya)
 4. **Deployments > Redeploy** setelah mengubah environment variables.
 
 Setiap `git push` ke branch `main` otomatis memicu deploy ulang.
+
+## 4. Aktifkan Real-time (Pusher Channels)
+
+Tanpa langkah ini aplikasi tetap jalan, tetapi pesan baru muncul dengan jeda sampai 2 detik (polling).
+
+1. Daftar di [pusher.com](https://pusher.com) dan buat app di **Channels** (paket **Sandbox** gratis:
+   200.000 pesan/hari dan 100 koneksi bersamaan; cek syarat terbaru di situs Pusher).
+2. Pilih cluster terdekat (misalnya `ap1` Singapore), frontend **Vanilla JS**, backend **Node.js**.
+3. Buka **App Keys** dan salin `app_id`, `key`, `secret`, `cluster`.
+4. Isi di Vercel (**Settings > Environment Variables**), lalu **Redeploy**:
+
+   | Nama | Isi |
+   |---|---|
+   | `PUSHER_APP_ID` | `app_id` |
+   | `PUSHER_KEY` | `key` |
+   | `PUSHER_SECRET` | `secret` (rahasia, jangan dibagikan) |
+   | `PUSHER_CLUSTER` | misalnya `ap1` |
+
+Untuk tes lokal, tambahkan empat variabel yang sama ke `local/.env`.
+
+Cara kerjanya: saat pesan dikirim, server mengirim **sinyal** lewat Pusher ke channel privat penerima
+(`private-u-<id>`). Browser penerima langsung mengambil pesannya lewat `/api/poll`. Isi pesan tidak
+dikirim lewat Pusher. Selama Pusher tersambung, polling melambat jadi 10 detik hanya sebagai cadangan
+dan untuk memperbarui status online.
 
 ## Mencoba Chat
 
 1. Daftar akun baru, lalu login.
 2. Di perangkat/jendela Incognito lain, daftar dan login dengan akun kedua.
 3. Klik **Tambah Teman via ID**, masukkan ID akun kedua, lalu kirim pesan.
-4. Pesan muncul di sisi penerima dalam sekitar 2 detik.
+4. Pesan muncul di sisi penerima hampir seketika (maksimal sekitar 2 detik tanpa Pusher).
 5. Klik **Masukkan kunci untuk melihat pesan** dan isi kunci akunmu.
 
 ## Cara Kerja Encoding
@@ -117,8 +142,9 @@ di browser untuk digambar dan di-decode.
 Server serverless tidak menyimpan koneksi terbuka, jadi:
 
 - Aksi (daftar, login, kirim pesan, ganti kunci, hapus pesan) dikirim lewat `POST /api/emit`.
-- Browser menanyakan pesan baru dan daftar user online lewat `POST /api/poll`
-  (tiap 2 detik; tiap 8 detik jika tab tidak aktif).
+- Browser mengambil pesan baru dan daftar user online lewat `POST /api/poll`. Dengan Pusher aktif,
+  pengambilan dipicu sinyal real-time (cadangan tiap 10 detik). Tanpa Pusher: tiap 2 detik
+  (8 detik jika tab tidak aktif).
 - Setelah login, server memberi token sesi bertanda tangan (berlaku 12 jam).
 - User dianggap online jika aktif dalam 20 detik terakhir.
 
@@ -128,7 +154,9 @@ Server serverless tidak menyimpan koneksi terbuka, jadi:
   atau Network Access Atlas belum `0.0.0.0/0`. Lihat **Vercel > Logs** untuk detailnya.
 - **Halaman 404 / `/api` tidak ditemukan di Vercel**: pastikan Root Directory kosong dan
   `vercel.json` ikut ter-push.
-- **Pesan tidak masuk ke penerima**: tunggu 2 detik; pastikan penerima sudah login.
+- **Pesan tidak masuk ke penerima**: pastikan penerima sudah login dan tunggu beberapa detik.
+- **Masih terasa tidak real-time**: cek empat variabel `PUSHER_*` di Vercel sudah benar dan sudah di-Redeploy.
+  Buka **Debug Console** di dashboard Pusher untuk melihat koneksi dan sinyal yang masuk.
 
 ## Catatan Keamanan
 

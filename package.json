@@ -7,10 +7,13 @@
     "start": "node local/server.js",
     "dev": "node --watch local/server.js"
   },
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "mongodb": "^6.9.0"
+    "mongodb": "^6.9.0",
+    "pusher": "^5.2.0"
   }
 }

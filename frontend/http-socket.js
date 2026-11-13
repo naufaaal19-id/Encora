@@ -4,7 +4,8 @@
 window.createHttpSocket = function () {
     const handlers = {};
     const seen = new Set();            // id pesan yang sudah ditampilkan (buang duplikat)
-    let token = null, since = 0, timer = null;
+    let token = null, since = 0, timer = null, polling = false;
+    let pusher = null, live = false;   // live = Pusher tersambung, polling jadi cadangan lambat
 
     const FAIL = {
         login_account: ['auth_response', { status: 'error', message: 'Gagal menghubungi server. Coba lagi.' }],
@@ -21,6 +22,7 @@ window.createHttpSocket = function () {
             seen.clear();
             (payload.history || []).forEach((h) => seen.add(h.id));
             startPolling();
+            startRealtime(payload.rt, payload.user_id);
         }
         if (name === 'message_saved' && payload && payload.id) seen.add(payload.id);
         if (name === 'receive_message' && payload) {
@@ -49,21 +51,45 @@ window.createHttpSocket = function () {
         }
     }
 
-    function startPolling() {
-        stopPolling();
-        const tick = async () => {
-            if (!token) return;
-            try {
-                const r = await post('/api/poll', { token, since });
-                if (r.expired) { stopPolling(); return; }
-                if (r.now) since = r.now;
-                (r.events || []).forEach(([n, p]) => fire(n, p));
-            } catch (e) { /* koneksi putus sementara, coba lagi */ }
-            if (token) timer = setTimeout(tick, document.hidden ? 8000 : 2000);
-        };
-        timer = setTimeout(tick, 2000);
+    // Satu kali polling: ambil pesan baru + daftar online
+    async function pollOnce() {
+        if (!token || polling) return;
+        polling = true;
+        try {
+            const r = await post('/api/poll', { token, since });
+            if (r.expired) { stopPolling(); return; }
+            if (r.now) since = r.now;
+            (r.events || []).forEach(([n, p]) => fire(n, p));
+        } catch (e) { /* koneksi putus sementara, coba lagi */ }
+        polling = false;
     }
-    function stopPolling() { if (timer) clearTimeout(timer); timer = null; }
+    function nextDelay() { return live ? 10000 : (document.hidden ? 8000 : 2000); }
+    function schedule() {
+        clearTimeout(timer);
+        if (!token) return;
+        timer = setTimeout(async () => { await pollOnce(); schedule(); }, nextDelay());
+    }
+    function startPolling() { stopPolling(); schedule(); }
+    function stopPolling() {
+        clearTimeout(timer); timer = null; polling = false; live = false;
+        if (pusher) { try { pusher.disconnect(); } catch (e) {} pusher = null; }
+    }
+    async function pollNow() { await pollOnce(); schedule(); }
+
+    // Real-time: Pusher mengirim sinyal "ada pesan baru", lalu langsung ambil pesannya
+    function startRealtime(rt, userId) {
+        if (!rt || !window.Pusher || !userId) return;
+        try {
+            pusher = new window.Pusher(rt.key, {
+                cluster: rt.cluster,
+                channelAuthorization: { endpoint: '/api/pusher-auth', transport: 'ajax', params: { token } }
+            });
+            const ch = pusher.subscribe('private-u-' + userId);
+            ch.bind('new', pollNow);
+            ch.bind('pusher:subscription_succeeded', () => { live = true; pollNow(); });
+            pusher.connection.bind('state_change', (st) => { live = st.current === 'connected'; schedule(); });
+        } catch (e) { pusher = null; live = false; }
+    }
 
     const api = {
         connected: true,
